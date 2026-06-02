@@ -46,7 +46,8 @@ Result* nw_align_c_full(
       memset(Y, 0, matrix_bytes);
 
       int32_t score = nw_align_c_kernel(
-          aa1, l1, aa2, l2, matrix, matrix_cols, char_to_idx, gap_o, gap_e, min_inf, M, X, Y);
+          aa1, l1, aa2, l2, matrix, matrix_cols, char_to_idx, gap_o, gap_e, min_inf, M, X, Y,
+          MAX_PROTEIN_LEN);
       res[curr_line].score = score;
       uint8_t* out_al1 = res[curr_line].al1;
       uint8_t* out_al2 = res[curr_line].al2;
@@ -94,7 +95,7 @@ int32_t nw_backtrace_c(
     uint8_t* out_al2) {
   int i = l1;
   int j = l2;
-  int cols = l2 + 1;
+  int cols = MAX_PROTEIN_LEN;
   int max_len = l1 + l2;
 
   uint8_t tmp1[512];

@@ -25,21 +25,16 @@ _lib.nw_align_c_kernel.argtypes = [
     ctypes.c_int,  # l1
     ndpointer(dtype=np.uint8, ndim=1, flags="C_CONTIGUOUS"),  # arr2
     ctypes.c_int,  # l2
-    ndpointer(dtype=np.int32, ndim=2, flags="C_CONTIGUOUS"),  # matrix (BLOSUM)
+    ndpointer(dtype=np.int32, ndim=2, flags="C_CONTIGUOUS"),  # BLOSUM62 matrix
     ctypes.c_int,  # matrix_cols
     ndpointer(dtype=np.int32, ndim=1, flags="C_CONTIGUOUS"),  # char_to_idx
     ctypes.c_int32,  # gap_o
     ctypes.c_int32,  # gap_e
     ctypes.c_int32,  # min_inf
-    ndpointer(
-        dtype=np.int32, ndim=2, flags="C_CONTIGUOUS"
-    ),  # M (由 Python 传入用于填表)
-    ndpointer(
-        dtype=np.int32, ndim=2, flags="C_CONTIGUOUS"
-    ),  # X (由 Python 传入用于填表)
-    ndpointer(
-        dtype=np.int32, ndim=2, flags="C_CONTIGUOUS"
-    ),  # Y (由 Python 传入用于填表)
+    ndpointer(dtype=np.int32, ndim=2, flags="C_CONTIGUOUS"),  # M
+    ndpointer(dtype=np.int32, ndim=2, flags="C_CONTIGUOUS"),  # X
+    ndpointer(dtype=np.int32, ndim=2, flags="C_CONTIGUOUS"),  # Y
+    ctypes.c_int,
 ]
 
 _lib.nw_align_c_kernel.restype = ctypes.c_int32
@@ -66,6 +61,8 @@ def nw_align_c(
 
     matrix_cols = blosum_matrix.shape[1]
 
+    cols = l2 + 1
+
     best_score = _lib.nw_align_c_kernel(
         arr1,
         l1,
@@ -80,6 +77,7 @@ def nw_align_c(
         M,
         X,
         Y,
+        cols,
     )
 
     return int(best_score), M, X, Y
