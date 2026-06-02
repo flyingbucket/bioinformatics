@@ -9,8 +9,103 @@ MIN_INF = -999999
 
 BLOSUM_MATRIX = np.array(BLOSUM62, dtype=np.int32)
 CHAR_TO_IDX = np.full(256, -1, dtype=np.int32)
-for idx, char in enumerate(BLOSUM62.alphabet):  # pyright: ignore[]
+for idx, char in enumerate(BLOSUM62.alphabet):  # pyright: ignore
     CHAR_TO_IDX[ord(char)] = idx
+
+
+STATE_M = 0
+STATE_X = 1
+STATE_Y = 2
+
+
+@njit
+def _backtrack_core(
+    aa1: str,
+    aa2: str,
+    M: np.ndarray,
+    X: np.ndarray,
+    Y: np.ndarray,
+    best_score: int,
+    blosum_matrix: np.ndarray,
+    char_to_idx: np.ndarray,
+    gap_o: int,
+    gap_e: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    i, j = len(aa1), len(aa2)
+    max_len = i + j
+
+    out1 = np.empty(max_len, dtype=np.uint8)
+    out2 = np.empty(max_len, dtype=np.uint8)
+
+    # 指针从最右侧开始逆向向前移动
+    idx = max_len
+
+    if best_score == M[i, j]:
+        curr_state = STATE_M
+    elif best_score == X[i, j]:
+        curr_state = STATE_X
+    else:
+        curr_state = STATE_Y
+
+    while i > 0 or j > 0:
+        idx -= 1
+        if i > 0 and j > 0:
+            if curr_state == STATE_M:
+                c1, c2 = aa1[i - 1], aa2[j - 1]
+                u1, u2 = ord(c1), ord(c2)
+                out1[idx] = u1
+                out2[idx] = u2
+
+                # 纯数组查表，速度极快
+                match_score = blosum_matrix[char_to_idx[u1], char_to_idx[u2]]
+
+                if M[i, j] == match_score + M[i - 1, j - 1]:
+                    curr_state = STATE_M
+                elif M[i, j] == match_score + X[i - 1, j - 1]:
+                    curr_state = STATE_X
+                else:
+                    curr_state = STATE_Y
+                i -= 1
+                j -= 1
+            elif curr_state == STATE_X:
+                out1[idx] = ord(aa1[i - 1])
+                out2[idx] = 45  # '-'
+                if X[i, j] == gap_o + M[i - 1, j]:
+                    curr_state = STATE_M
+                elif X[i, j] == gap_e + X[i - 1, j]:
+                    curr_state = STATE_X
+                else:
+                    raise ValueError("Backtrace failed in X")
+                i -= 1
+            elif curr_state == STATE_Y:
+                out1[idx] = 45  # '-'
+                out2[idx] = ord(aa2[j - 1])
+                if Y[i, j] == gap_o + M[i, j - 1]:
+                    curr_state = STATE_M
+                elif Y[i, j] == gap_e + Y[i, j - 1]:
+                    curr_state = STATE_Y
+                else:
+                    raise ValueError("Backtrace failed in Y")
+                j -= 1
+        elif i > 0:
+            out1[idx] = ord(aa1[i - 1])
+            out2[idx] = 45
+            i -= 1
+        elif j > 0:
+            out1[idx] = 45
+            out2[idx] = ord(aa2[j - 1])
+            j -= 1
+
+    return out1[idx:], out2[idx:]
+
+
+def backtrack_alignment(
+    aa1: str, aa2: str, M: np.ndarray, X: np.ndarray, Y: np.ndarray, best_score: int
+) -> tuple[str, str]:
+    res1_bytes, res2_bytes = _backtrack_core(
+        aa1, aa2, M, X, Y, best_score, BLOSUM_MATRIX, CHAR_TO_IDX, GAP_O, GAP_E
+    )
+    return res1_bytes.tobytes().decode("ascii"), res2_bytes.tobytes().decode("ascii")
 
 
 def nw_align_py(aa1: str, aa2: str) -> tuple[int, np.ndarray, np.ndarray, np.ndarray]:
@@ -27,7 +122,7 @@ def nw_align_py(aa1: str, aa2: str) -> tuple[int, np.ndarray, np.ndarray, np.nda
     for i in range(1, l1 + 1):
         for j in range(1, l2 + 1):
             c1, c2 = aa1[i - 1], aa2[j - 1]
-            match_score = int(BLOSUM62[c1, c2])  # pyright: ignore[reportArgumentType, reportCallIssue]
+            match_score = int(BLOSUM62[c1, c2])  # pyright: ignore
             M[i, j] = match_score + max(
                 M[i - 1, j - 1], X[i - 1, j - 1], Y[i - 1, j - 1]
             )
