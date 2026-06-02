@@ -1,0 +1,12 @@
+name: bio
+channels:
+  - defaults
+dependencies:
+  - python=3.12
+  - numpy=2.4.4
+  - biopython=1.86
+  - numba=0.65.1
+  - pandas=3.0.3
+  - tqdm
+  - openpyxl
+  - ipython
