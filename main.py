@@ -1,7 +1,6 @@
 import os
 import pandas as pd
 from Bio import SeqIO
-from tqdm import tqdm
 from nw_align import nw_align_py, nw_align_numba, backtrack_alignment
 
 
@@ -19,7 +18,7 @@ def main():
     num_records = len(processed_records)
     results = []
 
-    for i in tqdm(range(num_records)):
+    for i in range(num_records):
         rec1 = processed_records[i]
         for j in range(i + 1, num_records):
             rec2 = processed_records[j]
