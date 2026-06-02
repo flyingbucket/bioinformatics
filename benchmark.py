@@ -101,7 +101,7 @@ def main():
     monitor_c = MemoryMonitor(pid)
     monitor_c.start()
 
-    _, c_time = run_alignment_pipeline(processed_records, nw_align_c)
+    final_results, c_time = run_alignment_pipeline(processed_records, nw_align_c)
 
     monitor_c.stop()
     monitor_c.join()
@@ -112,7 +112,7 @@ def main():
     monitor_nb = MemoryMonitor(pid)
     monitor_nb.start()
 
-    final_results, nb_time = run_alignment_pipeline(processed_records, nw_align_numba)
+    _, nb_time = run_alignment_pipeline(processed_records, nw_align_numba)
 
     monitor_nb.stop()
     monitor_nb.join()
@@ -122,7 +122,7 @@ def main():
     print("\033[31mSaving result DataFrame\033[0m")
     start_time = time.perf_counter()
     df = pd.DataFrame(final_results)
-    output_dir = "./artifacts"
+    output_dir = "./artifacts2"
     os.makedirs(output_dir, exist_ok=True)
     df.to_excel(f"{output_dir}/submission_file_2.xlsx", index=False)
     df.to_csv(f"{output_dir}/submission_file_2.csv", index=False)
