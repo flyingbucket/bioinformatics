@@ -13,6 +13,7 @@ typedef struct {
   double identity_len1;
   double identity_len2;
 } Result;
+
 int32_t nw_align_c_kernel(
     const uint8_t* arr1,
     int l1,
@@ -26,7 +27,8 @@ int32_t nw_align_c_kernel(
     int32_t min_inf,
     int32_t* M,
     int32_t* X,
-    int32_t* Y);
+    int32_t* Y,
+    int cols);
 
 static inline int32_t max2(int32_t a, int32_t b) { return (a > b) ? a : b; }
 

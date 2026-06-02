@@ -170,7 +170,7 @@ def analyze_mismatch(
             check_dtype=False,
         )
         print(
-            f"        \033[36m[Diagnosis Result]\033[0m 发现问题！两边的数据内容【完全一致】，但【行顺序不一致】。"
+            "        \033[36m[Diagnosis Result]\033[0m 发现问题！两边的数据内容【完全一致】，但【行顺序不一致】。"
         )
         print(
             f"        说明 '{name_target}' 内部实现的嵌套循环顺序（或索引累加逻辑）与要求的标准 FASTA 字典序有出入。"
@@ -178,7 +178,7 @@ def analyze_mismatch(
         return
     except AssertionError:
         print(
-            f"        排序后仍不一致。说明不仅仅是行顺序问题，内部计算或任务覆盖有实质性差异。"
+            "        排序后仍不一致。说明不仅仅是行顺序问题，内部计算或任务覆盖有实质性差异。"
         )
 
     # 维度 2：检查【前两列 Uniprot ID 作为索引是否完全一致】（验证是否完成了完全相同的比对任务）
@@ -189,11 +189,11 @@ def analyze_mismatch(
     try:
         pd.testing.assert_frame_equal(ids_base, ids_target, check_dtype=False)
         print(
-            f"        [Index Check] 任务索引对齐通过。两组代码完成了【完全相同】的对偶比对任务。"
+            "        [Index Check] 任务索引对齐通过。两组代码完成了【完全相同】的对偶比对任务。"
         )
 
         # 维度 3：索引一致，但后面的数据列（得分、对齐序列、相似度）不一样，精准抓出内鬼
-        print(f"        [Cell Check] 开始精确定位不一致的行列...")
+        print("        [Cell Check] 开始精确定位不一致的行列...")
 
         # 将 ID 设为索引，方便做对齐矩阵减法/比对
         df_base_indexed = df_base_sorted.set_index(idx_cols)
@@ -224,7 +224,7 @@ def analyze_mismatch(
                 print(
                     f"             列 \033[31m'{col}'\033[0m 存在不一致！共计 {len(mismatch_rows)} 行不匹配。"
                 )
-                print(f"             举例不一致的样本行（前 2 行）：")
+                print("             举例不一致的样本行（前 2 行）：")
                 for idx_pair in mismatch_rows.index[:2]:
                     val_base = df_base_indexed.loc[idx_pair, col]
                     val_target = df_target_indexed.loc[idx_pair, col]
@@ -233,7 +233,7 @@ def analyze_mismatch(
                     )
 
     except AssertionError:
-        print(f"         [Index Error] 两边生成的 Uniprot ID 对偶索引不一致！")
+        print("         [Index Error] 两边生成的 Uniprot ID 对偶索引不一致！")
         # 找出哪些任务在 target 中缺失了，或者多出来了
         set_base = set(zip(df_base[idx_cols[0]], df_base[idx_cols[1]]))
         set_target = set(zip(df_target[idx_cols[0]], df_target[idx_cols[1]]))
