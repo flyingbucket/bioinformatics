@@ -2,7 +2,6 @@ import os
 import ctypes
 import numpy as np
 from numpy.ctypeslib import ndpointer
-
 from Bio.Align import substitution_matrices
 
 BLOSUM62 = substitution_matrices.load("BLOSUM62")

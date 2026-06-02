@@ -1,6 +1,6 @@
 #include <stdint.h>
 
-static inline int32_t max2(int32_t a, int32_t b) { return (a > b) ? a : b; }
+#include "nw_align.h"
 
 int32_t nw_align_c_kernel(
     const uint8_t* arr1,
