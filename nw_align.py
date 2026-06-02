@@ -133,7 +133,7 @@ def nw_align_py(aa1: str, aa2: str) -> tuple[int, np.ndarray, np.ndarray, np.nda
 
 
 @njit
-def nw_align_kernel(
+def nw_align_numba_kernel(
     arr1: np.ndarray,
     arr2: np.ndarray,
     matrix: np.ndarray,
@@ -183,6 +183,6 @@ def nw_align_numba(
 ) -> tuple[int, np.ndarray, np.ndarray, np.ndarray]:
     arr1 = np.frombuffer(seq1_str.encode("ascii"), dtype=np.uint8)
     arr2 = np.frombuffer(seq2_str.encode("ascii"), dtype=np.uint8)
-    return nw_align_kernel(
+    return nw_align_numba_kernel(
         arr1, arr2, BLOSUM_MATRIX, CHAR_TO_IDX, GAP_O, GAP_E, MIN_INF
     )
