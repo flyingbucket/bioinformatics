@@ -104,7 +104,7 @@ def run_c_kernel_only(processed_records, pid) -> BenchmarkResult:
     monitor.stop()
     monitor.join()
     return BenchmarkResult(
-        "C Kernel Only", elapsed, monitor.peak_memory / (1024 * 1024), df
+        "C_Kernel_Only", elapsed, monitor.peak_memory / (1024 * 1024), df
     )
 
 
@@ -118,12 +118,10 @@ def run_full_c(processed_records, pid) -> BenchmarkResult:
     elapsed = time.perf_counter() - start
 
     df = pd.DataFrame(results)
-    if not df.empty:
-        df = df.sort_values(by=["Uniprot ID 1", "Uniprot ID 2"]).reset_index(drop=True)
 
     monitor.stop()
     monitor.join()
-    return BenchmarkResult("Full C", elapsed, monitor.peak_memory / (1024 * 1024), df)
+    return BenchmarkResult("Full_C", elapsed, monitor.peak_memory / (1024 * 1024), df)
 
 
 def run_numba(processed_records, pid) -> BenchmarkResult:
@@ -153,7 +151,7 @@ def analyze_mismatch(
         )
         return
 
-    # 维度 1：排查是否仅仅是【行循环顺序不对】
+    # 排查是否仅仅是行循环顺序不对
     df_base_sorted = df_base.sort_values(
         by=["Uniprot ID 1", "Uniprot ID 2"]
     ).reset_index(drop=True)
@@ -225,7 +223,7 @@ def analyze_mismatch(
                     f"             列 \033[31m'{col}'\033[0m 存在不一致！共计 {len(mismatch_rows)} 行不匹配。"
                 )
                 print("             举例不一致的样本行（前 2 行）：")
-                for idx_pair in mismatch_rows.index[:2]:
+                for idx_pair in mismatch_rows.index[:2]:  # pyright: ignore
                     val_base = df_base_indexed.loc[idx_pair, col]
                     val_target = df_target_indexed.loc[idx_pair, col]
                     print(
@@ -251,9 +249,6 @@ def analyze_mismatch(
 
 
 def validate_consistency(results_list: list[BenchmarkResult]):
-    """
-    主验证驱动引擎
-    """
     print(
         "\n\033[34m[Validation] Starting Strict Sequence Order Consistency Check...\033[0m"
     )
@@ -295,9 +290,6 @@ def validate_consistency(results_list: list[BenchmarkResult]):
         )
 
 
-# ==============================================================================
-# 5. 结果打印与主程序
-# ==============================================================================
 def print_benchmark_report(
     results_list: list[BenchmarkResult], preload_time: float, save_time: float
 ):
@@ -319,7 +311,6 @@ def main():
 
     print("\033[33mStart benchmark\033[0m")
 
-    # 1. 数据预处理
     start_time = time.perf_counter()
     processed_records = []
     for rec in SeqIO.parse(fasta_path, format="fasta"):
@@ -330,35 +321,28 @@ def main():
     preload_time = time.perf_counter() - start_time
     print("\033[31mFASTA data preprocess finished\033[0m")
 
-    # 2. Numba 预热
     dummy_seq = "ACDEF"
     _ = nw_align_numba(dummy_seq, dummy_seq)
     _ = backtrack_alignment(dummy_seq, dummy_seq, *_[1:4], _[0])
 
-    # 3. 顺序执行各个方案
     bench_records = []
 
-    # 如需测试纯 Python 可以随时取消注释
     # bench_records.append(run_pure_python(processed_records, pid))
-
     bench_records.append(run_c_kernel_only(processed_records, pid))
     bench_records.append(run_full_c(processed_records, pid))
     bench_records.append(run_numba(processed_records, pid))
 
-    # 4. 执行多维度一致性验证
     validate_consistency(bench_records)
 
-    # 5. 保存结果（此时结果已严格保留了原始的 FASTA 组合字典序）
     print("\n\033[31mSaving result DataFrame\033[0m")
     start_time = time.perf_counter()
-    final_df = bench_records[0].df  # 默认取第一个基准的结果集落盘
-    output_dir = "./artifacts2"
+    output_dir = "./artifacts/benchmark"
     os.makedirs(output_dir, exist_ok=True)
-    final_df.to_excel(f"{output_dir}/submission_file_2.xlsx", index=False)
-    final_df.to_csv(f"{output_dir}/submission_file_2.csv", index=False)
+    for record in bench_records:
+        df = record.df
+        df.to_csv(f"{output_dir}/{record.name}.csv", index=False)
     save_time = time.perf_counter() - start_time
 
-    # 6. 打印最终报告
     print_benchmark_report(bench_records, preload_time, save_time)
 
 
