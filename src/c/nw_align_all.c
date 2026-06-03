@@ -39,7 +39,7 @@ Result* nw_align_c_full_omp(
 
 #pragma omp barrier
     if (!alloc_failed) {
-#pragma omp for schedule(dynamic)
+#pragma omp for schedule(guided)
       for (int i = 0; i < n; i++) {
         const uint8_t* aa1 = full_seq + seq_offset[i];
         const char* id1 = full_id + i * ID_LEN;
