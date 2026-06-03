@@ -1,44 +1,37 @@
 import os
 import time
-import threading
+import multiprocessing
 from dataclasses import dataclass
 import pandas as pd
 import psutil
 from Bio import SeqIO
 from nw_align.nw_align import nw_align_py, nw_align_numba, backtrack_alignment
 from nw_align.nw_align_kernel_only_wrapper import nw_align_c as nw_align_c_kernel_only
-from nw_align.nw_align_c_all_wrapper import nw_align_c_all_records
+from nw_align.nw_align_c_all_wrapper import (
+    nw_align_c_all_omp_records,
+    nw_align_c_all_records,
+)
 
 
 @dataclass
 class BenchmarkResult:
     name: str
     time_s: float
-    peak_mem_mb: float
+    base_mem_mb: float
+    peak_delta_mb: float
     df: pd.DataFrame
 
 
-class MemoryMonitor(threading.Thread):
-    def __init__(self, pid, interval=0.002):
-        super().__init__()
-        self.pid = pid
-        self.interval = interval
-        self.peak_memory = 0
-        self.stopped = threading.Event()
-
-    def run(self):
-        try:
-            proc = psutil.Process(self.pid)
-            while not self.stopped.is_set():
-                mem = proc.memory_info().rss
-                if mem > self.peak_memory:
-                    self.peak_memory = mem
-                time.sleep(self.interval)
-        except Exception:
-            pass
-
-    def stop(self):
-        self.stopped.set()
+def format_time(seconds: float) -> str:
+    """根据时间跨度优雅地格式化时间输出"""
+    if seconds < 1.0:
+        return f"{seconds * 1000:.2f} ms"
+    elif seconds >= 60.0:
+        minutes = int(seconds // 60)
+        rem_seconds = seconds % 60
+        return f"{minutes} m {rem_seconds:.2f} s"
+    else:
+        return f"{seconds:.4f} s"
 
 
 def run_alignment_pipeline(processed_records, align_func, **kwargs):
@@ -75,66 +68,110 @@ def run_alignment_pipeline(processed_records, align_func, **kwargs):
     return df
 
 
-def run_pure_python(processed_records, pid) -> BenchmarkResult:
-    print("\033[31mRunning Pure Python Version...\033[0m")
-    monitor = MemoryMonitor(pid)
-    monitor.start()
+def task_worker(task_name, processed_records, ready_event, start_event, result_queue):
+    """独立子进程执行体"""
+    try:
+        if task_name == "Pure Python":
+            func = lambda: run_alignment_pipeline(processed_records, nw_align_py)
+        elif task_name == "C_Kernel_Only":
+            func = lambda: run_alignment_pipeline(
+                processed_records, nw_align_c_kernel_only
+            )
+        elif task_name == "Numba":
+            func = lambda: run_alignment_pipeline(processed_records, nw_align_numba)
+        elif task_name == "Full_C":
+            func = lambda: pd.DataFrame(nw_align_c_all_records(processed_records))
+        elif task_name == "Full_C_OMP":
+            func = lambda: pd.DataFrame(nw_align_c_all_omp_records(processed_records))
+        else:
+            raise ValueError(f"Unknown task name: {task_name}")
 
-    start = time.perf_counter()
-    df = run_alignment_pipeline(processed_records, nw_align_py)
-    elapsed = time.perf_counter() - start
+        # 挂起并通知主进程：环境已就绪，可以抓取初始 Baseline 内存了
+        ready_event.set()
 
-    monitor.stop()
-    monitor.join()
-    return BenchmarkResult(
-        "Pure Python", elapsed, monitor.peak_memory / (1024 * 1024), df
+        # 等待主进程抓取完毕后发出的开跑指令
+        start_event.wait()
+
+        # 探索性测试
+        start_time = time.perf_counter()
+        df = func()
+        first_elapsed = time.perf_counter() - start_time
+
+        # 根据第一遍的耗时，动态决定是否追跑
+        if first_elapsed < 5.0:
+            total_elapsed = first_elapsed
+            for _ in range(19):
+                sub_start = time.perf_counter()
+                _ = func()
+                total_elapsed += time.perf_counter() - sub_start
+            elapsed = total_elapsed / 20.0
+        else:
+            elapsed = first_elapsed
+
+        tmp_dir = "./artifacts/benchmark/.tmp"
+        os.makedirs(tmp_dir, exist_ok=True)
+        tmp_path = os.path.join(tmp_dir, f"{task_name}.pkl")
+        df.to_pickle(tmp_path)
+
+        result_queue.put((elapsed, None))
+    except Exception as e:
+        import traceback
+
+        result_queue.put((0.0, traceback.format_exc()))
+
+
+def run_task_in_process(task_name, processed_records) -> BenchmarkResult:
+    print(f"\033[31mRunning {task_name} Version (Isolated Process)...\033[0m")
+
+    ready_event = multiprocessing.Event()
+    start_event = multiprocessing.Event()
+    result_queue = multiprocessing.Queue()
+
+    p = multiprocessing.Process(
+        target=task_worker,
+        args=(task_name, processed_records, ready_event, start_event, result_queue),
     )
+    p.start()
 
+    # 等待子进程就绪
+    ready_event.wait()
 
-def run_c_kernel_only(processed_records, pid) -> BenchmarkResult:
-    print("\033[31mRunning C Kernel Version...\033[0m")
-    monitor = MemoryMonitor(pid)
-    monitor.start()
+    try:
+        proc = psutil.Process(p.pid)
+        base_mem = proc.memory_info().rss
+    except psutil.NoSuchProcess:
+        base_mem = 0
 
-    start = time.perf_counter()
-    df = run_alignment_pipeline(processed_records, nw_align_c_kernel_only)
-    elapsed = time.perf_counter() - start
+    peak_mem = base_mem
 
-    monitor.stop()
-    monitor.join()
-    return BenchmarkResult(
-        "C_Kernel_Only", elapsed, monitor.peak_memory / (1024 * 1024), df
-    )
+    start_event.set()
 
+    while p.is_alive():
+        try:
+            mem = proc.memory_info().rss
+            if mem > peak_mem:
+                peak_mem = mem
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            break
+        time.sleep(0.002)
 
-def run_full_c(processed_records, pid) -> BenchmarkResult:
-    print("\033[31mRunning Full C Version...\033[0m")
-    monitor = MemoryMonitor(pid)
-    monitor.start()
+    elapsed, error = result_queue.get()
+    p.join()
 
-    start = time.perf_counter()
-    results = nw_align_c_all_records(processed_records)
-    elapsed = time.perf_counter() - start
+    if error:
+        raise RuntimeError(f"Task [{task_name}] failed with exception:\n{error}")
 
-    df = pd.DataFrame(results)
+    tmp_path = f"./artifacts/benchmark/.tmp/{task_name}.pkl"
+    if os.path.exists(tmp_path):
+        df = pd.read_pickle(tmp_path)
+        os.remove(tmp_path)
+    else:
+        df = pd.DataFrame()
 
-    monitor.stop()
-    monitor.join()
-    return BenchmarkResult("Full_C", elapsed, monitor.peak_memory / (1024 * 1024), df)
+    base_mem_mb = base_mem / (1024 * 1024)
+    peak_delta_mb = max(0.0, (peak_mem - base_mem) / (1024 * 1024))
 
-
-def run_numba(processed_records, pid) -> BenchmarkResult:
-    print("\033[31mRunning Numba Version...\033[0m")
-    monitor = MemoryMonitor(pid)
-    monitor.start()
-
-    start = time.perf_counter()
-    df = run_alignment_pipeline(processed_records, nw_align_numba)
-    elapsed = time.perf_counter() - start
-
-    monitor.stop()
-    monitor.join()
-    return BenchmarkResult("Numba", elapsed, monitor.peak_memory / (1024 * 1024), df)
+    return BenchmarkResult(task_name, elapsed, base_mem_mb, peak_delta_mb, df)  # pyright: ignore
 
 
 def analyze_mismatch(
@@ -150,7 +187,6 @@ def analyze_mismatch(
         )
         return
 
-    # 排查是否仅仅是行循环顺序不对
     df_base_sorted = df_base.sort_values(
         by=["Uniprot ID 1", "Uniprot ID 2"]
     ).reset_index(drop=True)
@@ -178,7 +214,6 @@ def analyze_mismatch(
             "        排序后仍不一致。说明不仅仅是行顺序问题，内部计算或任务覆盖有实质性差异。"
         )
 
-    # 维度 2：检查【前两列 Uniprot ID 作为索引是否完全一致】（验证是否完成了完全相同的比对任务）
     idx_cols = ["Uniprot ID 1", "Uniprot ID 2"]
     ids_base = df_base_sorted[idx_cols]
     ids_target = df_target_sorted[idx_cols]
@@ -188,15 +223,11 @@ def analyze_mismatch(
         print(
             "        [Index Check] 任务索引对齐通过。两组代码完成了【完全相同】的对偶比对任务。"
         )
-
-        # 维度 3：索引一致，但后面的数据列（得分、对齐序列、相似度）不一样，精准抓出内鬼
         print("        [Cell Check] 开始精确定位不一致的行列...")
 
-        # 将 ID 设为索引，方便做对齐矩阵减法/比对
         df_base_indexed = df_base_sorted.set_index(idx_cols)
         df_target_indexed = df_target_sorted.set_index(idx_cols)
 
-        # 逐列排查
         data_cols = [
             "DP Score",
             "Aligned Sequence 1",
@@ -210,10 +241,8 @@ def analyze_mismatch(
                 "Sequence Identity (Length 1)",
                 "Sequence Identity (Length 2)",
             ]:
-                # 数值列：找出绝对误差大于 1e-6 的行
                 diff_mask = (df_base_indexed[col] - df_target_indexed[col]).abs() > 1e-6
             else:
-                # 字符串列：直接对比是否相等
                 diff_mask = df_base_indexed[col] != df_target_indexed[col]
 
             mismatch_rows = df_base_indexed[diff_mask]
@@ -231,7 +260,6 @@ def analyze_mismatch(
 
     except AssertionError:
         print("         [Index Error] 两边生成的 Uniprot ID 对偶索引不一致！")
-        # 找出哪些任务在 target 中缺失了，或者多出来了
         set_base = set(zip(df_base[idx_cols[0]], df_base[idx_cols[1]]))
         set_target = set(zip(df_target[idx_cols[0]], df_target[idx_cols[1]]))
 
@@ -254,13 +282,11 @@ def validate_consistency(results_list: list[BenchmarkResult]):
     if not results_list:
         return
 
-    # 以第一个跑出来的方案（如 C Kernel Only 或 Pure Python）作为绝对基准
     base_result = results_list[0]
     all_passed = True
 
     for target in results_list[1:]:
         try:
-            # 严格验证：不仅内容要对，每一行的相对顺序也必须完全一致
             pd.testing.assert_frame_equal(
                 base_result.df,
                 target.df,
@@ -268,15 +294,12 @@ def validate_consistency(results_list: list[BenchmarkResult]):
                 atol=1e-6,
                 check_dtype=False,
             )
-            print(
-                f"  └─ \033[32m[PASS]\033[0m {base_result.name} == {target.name} (原始行顺序与内容完全一致)"
-            )
+            print(f"  └─ \033[32m[PASS]\033[0m {base_result.name} == {target.name}")
         except AssertionError:
             all_passed = False
             print(
                 f"  └─ \033[31m[FAIL]\033[0m {base_result.name} != {target.name} (触发深度诊断...)"
             )
-            # 触发诊断机制
             analyze_mismatch(base_result.df, target.df, base_result.name, target.name)
 
     if all_passed:
@@ -293,20 +316,24 @@ def print_benchmark_report(
     results_list: list[BenchmarkResult], preload_time: float, save_time: float
 ):
     print("\n\033[33mBENCHMARK RESULTS\033[0m")
-    print(f"{'nw_align func':<18}{'time (s)':<18}{'Peak Memory(MB)':<22}")
-    print("-" * 60)
+    print(
+        f"{'nw_align func':<18}{'Time':<18}{'Base Mem (MB)':<18}{'Mem Increment (MB)':<20}"
+    )
+    print("-" * 74)
     for res in results_list:
-        print(f"{res.name:<18}{res.time_s:<18.4f}{res.peak_mem_mb:<22.2f}")
-    print("-" * 60)
+        time_str = format_time(res.time_s)
+        print(
+            f"{res.name:<18}{time_str:<18}{res.base_mem_mb:<18.2f}{res.peak_delta_mb:<20.2f}"
+        )
+    print("-" * 74)
 
     print("\nOther time consumption:")
-    print(f"FASTA Data Parsing: {preload_time:.4f} s")
-    print(f"Saving DataFrame Excel/CSV : {save_time:.4f} s")
+    print(f"FASTA Data Parsing: {format_time(preload_time)}")
+    print(f"Saving DataFrame Excel/CSV : {format_time(save_time)}")
 
 
 def main():
     fasta_path = "./data/uniprotkb_protein_name_myoglobin_standard20_A.fast.fasta"
-    pid = os.getpid()
 
     print("\033[33mStart benchmark\033[0m")
 
@@ -326,10 +353,11 @@ def main():
 
     bench_records = []
 
-    # bench_records.append(run_pure_python(processed_records, pid))
-    bench_records.append(run_c_kernel_only(processed_records, pid))
-    bench_records.append(run_full_c(processed_records, pid))
-    bench_records.append(run_numba(processed_records, pid))
+    # bench_records.append(run_task_in_process("Pure Python", processed_records))
+    bench_records.append(run_task_in_process("C_Kernel_Only", processed_records))
+    bench_records.append(run_task_in_process("Numba", processed_records))
+    bench_records.append(run_task_in_process("Full_C", processed_records))
+    bench_records.append(run_task_in_process("Full_C_OMP", processed_records))
 
     validate_consistency(bench_records)
 
@@ -346,4 +374,5 @@ def main():
 
 
 if __name__ == "__main__":
+    multiprocessing.set_start_method("fork", force=True)
     main()

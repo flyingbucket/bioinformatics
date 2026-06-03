@@ -61,3 +61,16 @@ Result* nw_align_c_full(
     int32_t gap_o,
     int32_t gap_e,
     int32_t min_inf);
+
+Result* nw_align_c_full_omp(
+    int num_records,
+    const uint8_t* full_seq,
+    const int32_t* seq_len,
+    const int32_t* seq_offset,
+    const char* full_id,
+    const int32_t* matrix,
+    int matrix_cols,
+    const int32_t* char_to_idx,
+    int32_t gap_o,
+    int32_t gap_e,
+    int32_t min_inf);
