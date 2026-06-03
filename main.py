@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from Bio import SeqIO
-from nw_align.nw_align import nw_align_py, nw_align_numba, backtrack_alignment
+from nw_align.nw_align import nw_align_numba, backtrack_alignment
 
 
 def main():
@@ -35,13 +35,13 @@ def main():
 
             results.append(
                 {
-                    "Uniprot ID 1": id1,
-                    "Uniprot ID 2": id2,
-                    "DP Score": score,
-                    "Aligned Sequence 1": al1,
-                    "Aligned Sequence 2": al2,
-                    "Sequence Identity (Length 1)": identity_len1,
-                    "Sequence Identity (Length 2)": identity_len2,
+                    "seq1_uniprot_id": id1,
+                    "seq2_uniprot_id": id2,
+                    "NW_affine_score": score,
+                    "aligned_seq1_with_gap": al1,
+                    "aligned_seq2_with_gap": al2,
+                    "identity_by_seq1_length": identity_len1,
+                    "identity_by_seq2_length": identity_len2,
                 }
             )
 

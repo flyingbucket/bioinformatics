@@ -123,13 +123,13 @@ def nw_align_c_all_records(processed_records):
 
         results.append(
             {
-                "Uniprot ID 1": res.id1.decode("ascii"),
-                "Uniprot ID 2": res.id2.decode("ascii"),
-                "DP Score": res.score,
-                "Aligned Sequence 1": al1_str,
-                "Aligned Sequence 2": al2_str,
-                "Sequence Identity (Length 1)": res.identity_len1,
-                "Sequence Identity (Length 2)": res.identity_len2,
+                "seq1_uniprot_id": res.id1.decode("ascii"),
+                "seq2_uniprot_id": res.id2.decode("ascii"),
+                "NW_affine_score": res.score,
+                "aligned_seq1_with_gap": al1_str,
+                "aligned_seq2_with_gap": al2_str,
+                "identity_by_seq1_length": res.identity_len1,
+                "identity_by_seq2_length": res.identity_len2,
             }
         )
 
@@ -194,13 +194,13 @@ def nw_align_c_all_omp_records(processed_records):
 
         results.append(
             {
-                "Uniprot ID 1": res.id1.decode("ascii"),
-                "Uniprot ID 2": res.id2.decode("ascii"),
-                "DP Score": res.score,
-                "Aligned Sequence 1": al1_str,
-                "Aligned Sequence 2": al2_str,
-                "Sequence Identity (Length 1)": res.identity_len1,
-                "Sequence Identity (Length 2)": res.identity_len2,
+                "seq1_uniprot_id": res.id1.decode("ascii"),
+                "seq2_uniprot_id": res.id2.decode("ascii"),
+                "NW_affine_score": res.score,
+                "aligned_seq1_with_gap": al1_str,
+                "aligned_seq2_with_gap": al2_str,
+                "identity_by_seq1_length": res.identity_len1,
+                "identity_by_seq2_length": res.identity_len2,
             }
         )
 

@@ -1,16 +1,23 @@
+import multiprocessing
 import os
 import time
-import multiprocessing
 from dataclasses import dataclass
+from functools import partial
+
 import pandas as pd
 import psutil
 from Bio import SeqIO
-from nw_align.nw_align import nw_align_py, nw_align_numba, backtrack_alignment
-from nw_align.nw_align_kernel_only_wrapper import nw_align_c as nw_align_c_kernel_only
+from Bio.Align import (
+    PairwiseAligner,
+    substitution_matrices,
+)
+
+from nw_align.nw_align import backtrack_alignment, nw_align_numba, nw_align_py
 from nw_align.nw_align_c_all_wrapper import (
     nw_align_c_all_omp_records,
     nw_align_c_all_records,
 )
+from nw_align.nw_align_kernel_only_wrapper import nw_align_c as nw_align_c_kernel_only
 
 
 @dataclass
@@ -55,13 +62,13 @@ def run_alignment_pipeline(processed_records, align_func, **kwargs):
 
             results.append(
                 {
-                    "Uniprot ID 1": id1,
-                    "Uniprot ID 2": id2,
-                    "DP Score": score,
-                    "Aligned Sequence 1": al1,
-                    "Aligned Sequence 2": al2,
-                    "Sequence Identity (Length 1)": identity_len1,
-                    "Sequence Identity (Length 2)": identity_len2,
+                    "seq1_uniprot_id": id1,
+                    "seq2_uniprot_id": id2,
+                    "NW_affine_score": score,
+                    "aligned_seq1_with_gap": al1,
+                    "aligned_seq2_with_gap": al2,
+                    "identity_by_seq1_length": identity_len1,
+                    "identity_by_seq2_length": identity_len2,
                 }
             )
     df = pd.DataFrame(results)
@@ -72,24 +79,32 @@ def task_worker(task_name, processed_records, ready_event, start_event, result_q
     """独立子进程执行体"""
     try:
         if task_name == "Pure Python":
-            func = lambda: run_alignment_pipeline(processed_records, nw_align_py)
+            func = partial(run_alignment_pipeline, processed_records, nw_align_py)
         elif task_name == "C_Kernel_Only":
-            func = lambda: run_alignment_pipeline(
-                processed_records, nw_align_c_kernel_only
+            func = partial(
+                run_alignment_pipeline, processed_records, nw_align_c_kernel_only
             )
         elif task_name == "Numba":
-            func = lambda: run_alignment_pipeline(processed_records, nw_align_numba)
+            func = partial(run_alignment_pipeline, processed_records, nw_align_numba)
         elif task_name == "Full_C":
-            func = lambda: pd.DataFrame(nw_align_c_all_records(processed_records))
+
+            def func():
+                return pd.DataFrame(nw_align_c_all_records(processed_records))
         elif task_name == "Full_C_OMP":
-            func = lambda: pd.DataFrame(nw_align_c_all_omp_records(processed_records))
+
+            def func():
+                return pd.DataFrame(nw_align_c_all_omp_records(processed_records))
+        elif task_name == "BioPython":
+
+            def func():
+                return run_biopython_pipeline(processed_records)
         else:
             raise ValueError(f"Unknown task name: {task_name}")
 
-        # 挂起并通知主进程：环境已就绪，可以抓取初始 Baseline 内存了
+        # 挂起并通知主进程
         ready_event.set()
 
-        # 等待主进程抓取完毕后发出的开跑指令
+        # 等待主进程抓取完毕后发出开跑
         start_event.wait()
 
         # 探索性测试
@@ -97,7 +112,6 @@ def task_worker(task_name, processed_records, ready_event, start_event, result_q
         df = func()
         first_elapsed = time.perf_counter() - start_time
 
-        # 根据第一遍的耗时，动态决定是否追跑
         if first_elapsed < 5.0:
             total_elapsed = first_elapsed
             for _ in range(19):
@@ -114,10 +128,65 @@ def task_worker(task_name, processed_records, ready_event, start_event, result_q
         df.to_pickle(tmp_path)
 
         result_queue.put((elapsed, None))
-    except Exception as e:
+    # except Exception:
+    #     import traceback
+    #
+    #     result_queue.put((0.0, traceback.format_exc()))
+    except Exception:
         import traceback
 
-        result_queue.put((0.0, traceback.format_exc()))
+        exc_info = traceback.format_exc()
+        if not ready_event.is_set():
+            ready_event.set()
+        try:
+            time.sleep(0.1)
+            result_queue.put((0.0, exc_info))
+        except Exception:
+            os._exit(1)
+
+
+def run_biopython_pipeline(processed_records):
+    aligner = PairwiseAligner()
+    aligner.mode = "global"
+
+    aligner.substitution_matrix = substitution_matrices.load("BLOSUM62")
+
+    aligner.open_gap_score = -11.0
+    aligner.extend_gap_score = -1.0
+
+    num_records = len(processed_records)
+    results = []
+
+    for i in range(num_records):
+        rec1 = processed_records[i]
+        for j in range(i + 1, num_records):
+            rec2 = processed_records[j]
+
+            id1, seq1_str = rec1["id"], rec1["seq"]
+            id2, seq2_str = rec2["id"], rec2["seq"]
+
+            alignments = aligner.align(seq1_str, seq2_str)
+            best_alignment = alignments[0]
+
+            score = best_alignment.score  # pyright: ignore
+            al1, al2 = best_alignment[0], best_alignment[1]
+
+            matches = sum(1 for a, b in zip(al1, al2) if a == b and a != "-")  # pyright: ignore
+            identity_len1 = matches / len(seq1_str)
+            identity_len2 = matches / len(seq2_str)
+
+            results.append(
+                {
+                    "seq1_uniprot_id": id1,
+                    "seq2_uniprot_id": id2,
+                    "NW_affine_score": score,
+                    "aligned_seq1_with_gap": al1,
+                    "aligned_seq2_with_gap": al2,
+                    "identity_by_seq1_length": identity_len1,
+                    "identity_by_seq2_length": identity_len2,
+                }
+            )
+    return pd.DataFrame(results)
 
 
 def run_task_in_process(task_name, processed_records) -> BenchmarkResult:
@@ -148,7 +217,7 @@ def run_task_in_process(task_name, processed_records) -> BenchmarkResult:
 
     while p.is_alive():
         try:
-            mem = proc.memory_info().rss
+            mem = proc.memory_info().rss  # pyright: ignore
             if mem > peak_mem:
                 peak_mem = mem
         except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -188,10 +257,10 @@ def analyze_mismatch(
         return
 
     df_base_sorted = df_base.sort_values(
-        by=["Uniprot ID 1", "Uniprot ID 2"]
+        by=["seq1_uniprot_id", "seq2_uniprot_id"]
     ).reset_index(drop=True)
     df_target_sorted = df_target.sort_values(
-        by=["Uniprot ID 1", "Uniprot ID 2"]
+        by=["seq1_uniprot_id", "seq2_uniprot_id"]
     ).reset_index(drop=True)
 
     try:
@@ -213,8 +282,7 @@ def analyze_mismatch(
         print(
             "        排序后仍不一致。说明不仅仅是行顺序问题，内部计算或任务覆盖有实质性差异。"
         )
-
-    idx_cols = ["Uniprot ID 1", "Uniprot ID 2"]
+    idx_cols = ["seq1_uniprot_id", "seq2_uniprot_id"]
     ids_base = df_base_sorted[idx_cols]
     ids_target = df_target_sorted[idx_cols]
 
@@ -227,13 +295,12 @@ def analyze_mismatch(
 
         df_base_indexed = df_base_sorted.set_index(idx_cols)
         df_target_indexed = df_target_sorted.set_index(idx_cols)
-
         data_cols = [
-            "DP Score",
-            "Aligned Sequence 1",
-            "Aligned Sequence 2",
-            "Sequence Identity (Length 1)",
-            "Sequence Identity (Length 2)",
+            "NW_affine_score",
+            "aligned_seq1_with_gap",
+            "aligned_seq2_with_gap",
+            "identity_by_seq1_length",
+            "identity_by_seq2_length",
         ]
         for col in data_cols:
             if col in [
@@ -353,7 +420,8 @@ def main():
 
     bench_records = []
 
-    # bench_records.append(run_task_in_process("Pure Python", processed_records))
+    bench_records.append(run_task_in_process("BioPython", processed_records))
+    bench_records.append(run_task_in_process("Pure Python", processed_records))
     bench_records.append(run_task_in_process("C_Kernel_Only", processed_records))
     bench_records.append(run_task_in_process("Numba", processed_records))
     bench_records.append(run_task_in_process("Full_C", processed_records))
