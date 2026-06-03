@@ -1,9 +1,102 @@
+#include <omp.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "nw_align.h"
+
+Result* nw_align_c_full_omp(
+    int num_records,
+    const uint8_t* full_seq,
+    const int32_t* seq_len,
+    const int32_t* seq_offset,
+    const char* full_id,
+    const int32_t* matrix,
+    int matrix_cols,
+    const int32_t* char_to_idx,
+    int32_t gap_o,
+    int32_t gap_e,
+    int32_t min_inf) {
+  const int n = num_records;
+  const size_t total_pairs = (size_t)n * (n - 1) / 2;
+
+  Result* res = (Result*)malloc(sizeof(Result) * total_pairs);
+  if (res == NULL) return NULL;
+
+  int alloc_failed = 0;
+
+#pragma omp parallel
+  {
+    int32_t* M = (int32_t*)malloc(sizeof(int32_t) * MAX_PROTEIN_LEN * MAX_PROTEIN_LEN);
+    int32_t* X = (int32_t*)malloc(sizeof(int32_t) * MAX_PROTEIN_LEN * MAX_PROTEIN_LEN);
+    int32_t* Y = (int32_t*)malloc(sizeof(int32_t) * MAX_PROTEIN_LEN * MAX_PROTEIN_LEN);
+
+    if (M == NULL || X == NULL || Y == NULL) {
+#pragma omp atomic write
+      alloc_failed = 1;
+    }
+
+#pragma omp barrier
+    if (!alloc_failed) {
+#pragma omp for schedule(dynamic)
+      for (int i = 0; i < n; i++) {
+        const uint8_t* aa1 = full_seq + seq_offset[i];
+        const char* id1 = full_id + i * ID_LEN;
+        int l1 = seq_len[i];
+
+        const size_t base = (size_t)i * (2u * (size_t)n - (size_t)i - 1u) / 2u;
+
+        for (int j = i + 1; j < n; j++) {
+          const uint8_t* aa2 = full_seq + seq_offset[j];
+          const char* id2 = full_id + j * ID_LEN;
+          int l2 = seq_len[j];
+
+          // pair (i,j) 的唯一位置
+          const size_t idx = base + (size_t)(j - i - 1);
+
+          memcpy(res[idx].id1, id1, ID_LEN);
+          memcpy(res[idx].id2, id2, ID_LEN);
+
+          res[idx].id1[ID_LEN] = '\0';
+          res[idx].id2[ID_LEN] = '\0';
+
+          int32_t score = nw_align_c_kernel(
+              aa1, l1, aa2, l2, matrix, matrix_cols, char_to_idx, gap_o, gap_e, min_inf, M, X, Y,
+              MAX_PROTEIN_LEN);
+
+          res[idx].score = score;
+
+          uint8_t* out_al1 = res[idx].al1;
+          uint8_t* out_al2 = res[idx].al2;
+
+          int32_t aligned_len = nw_backtrace_c(
+              aa1, l1, aa2, l2, M, X, Y, score, matrix, matrix_cols, char_to_idx, gap_o, gap_e,
+              out_al1, out_al2);
+
+          int matches = 0;
+          for (int k = 0; k < aligned_len; k++) {
+            matches += (out_al1[k] == out_al2[k]) && (out_al1[k] != GAP_ASCII);
+          }
+
+          res[idx].identity_len1 = (double)matches / (double)l1;
+          res[idx].identity_len2 = (double)matches / (double)l2;
+        }
+      }
+    }
+
+    if (M) free(M);
+    if (X) free(X);
+    if (Y) free(Y);
+  }
+
+  if (alloc_failed) {
+    free(res);
+    return NULL;
+  }
+
+  return res;
+}
 
 Result* nw_align_c_full(
     int num_records,
@@ -19,6 +112,7 @@ Result* nw_align_c_full(
     int32_t min_inf) {
   Result* res = (Result*)malloc(sizeof(Result) * (num_records - 1) * num_records / 2);
   if (res == NULL) return NULL;
+
   int32_t* M = (int32_t*)malloc(sizeof(int32_t) * MAX_PROTEIN_LEN * MAX_PROTEIN_LEN);
   int32_t* X = (int32_t*)malloc(sizeof(int32_t) * MAX_PROTEIN_LEN * MAX_PROTEIN_LEN);
   int32_t* Y = (int32_t*)malloc(sizeof(int32_t) * MAX_PROTEIN_LEN * MAX_PROTEIN_LEN);
@@ -39,11 +133,6 @@ Result* nw_align_c_full(
       res[curr_line].id1[ID_LEN] = '\0';
       res[curr_line].id2[ID_LEN] = '\0';
       int l2 = seq_len[j];
-
-      size_t matrix_bytes = sizeof(int32_t) * MAX_PROTEIN_LEN * MAX_PROTEIN_LEN;
-      memset(M, 0, matrix_bytes);
-      memset(X, 0, matrix_bytes);
-      memset(Y, 0, matrix_bytes);
 
       int32_t score = nw_align_c_kernel(
           aa1, l1, aa2, l2, matrix, matrix_cols, char_to_idx, gap_o, gap_e, min_inf, M, X, Y,
@@ -71,7 +160,6 @@ cleanup:
 
   return res;
 }
-
 // bactrace status
 #define STATE_M 0
 #define STATE_X 1
