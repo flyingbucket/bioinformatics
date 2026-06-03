@@ -5,10 +5,9 @@ from dataclasses import dataclass
 import pandas as pd
 import psutil
 from Bio import SeqIO
-
-from nw_align import nw_align_py, nw_align_numba, backtrack_alignment
-from nw_align_kernel_only_wrapper import nw_align_c as nw_align_c_kernel_only
-from nw_align_c_all_wrapper import nw_align_c_all_records
+from nw_align.nw_align import nw_align_py, nw_align_numba, backtrack_alignment
+from nw_align.nw_align_kernel_only_wrapper import nw_align_c as nw_align_c_kernel_only
+from nw_align.nw_align_c_all_wrapper import nw_align_c_all_records
 
 
 @dataclass
