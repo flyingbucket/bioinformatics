@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from Bio import SeqIO
-from nw_align import nw_align_py, nw_align_numba, backtrack_alignment
+from nw_align.nw_align import nw_align_py, nw_align_numba, backtrack_alignment
 
 
 def main():

@@ -1,0 +1,36 @@
+[
+  {
+    "file": "src/c/nw_align_all.c",
+    "arguments": [
+      "/usr/bin/clang",
+      "-O3",
+      "-march=native",
+      "-fPIC",
+      "-Iinclude",
+      "-fopenmp=libomp",
+      "-c",
+      "src/c/nw_align_all.c",
+      "-o",
+      "lib/nw_align_all.o"
+    ],
+    "directory": "/home/flyingbucket/CODE/bioinformatics",
+    "output": "lib/nw_align_all.o"
+  },
+  {
+    "file": "src/c/nw_align_kernel.c",
+    "arguments": [
+      "/usr/bin/clang",
+      "-O3",
+      "-march=native",
+      "-fPIC",
+      "-Iinclude",
+      "-fopenmp=libomp",
+      "-c",
+      "src/c/nw_align_kernel.c",
+      "-o",
+      "lib/nw_align_kernel.o"
+    ],
+    "directory": "/home/flyingbucket/CODE/bioinformatics",
+    "output": "lib/nw_align_kernel.o"
+  }
+]
