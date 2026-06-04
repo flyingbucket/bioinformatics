@@ -49,8 +49,8 @@ def main():
     output_dir = "./artifacts"
     os.makedirs(output_dir, exist_ok=True)
 
-    df.to_excel(f"{output_dir}/submission_file_2.xlsx", index=False)
-    df.to_csv(f"{output_dir}/submission_file_2.csv", index=False)
+    df.to_excel(f"{output_dir}/result.xlsx", index=False)
+    df.to_csv(f"{output_dir}/result.csv", index=False)
     print(f"Saved to: {output_dir}")
 
 
