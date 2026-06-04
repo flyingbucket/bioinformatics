@@ -438,6 +438,19 @@ def main():
         df.to_csv(f"{output_dir}/{record.name}.csv", index=False)
     save_time = time.perf_counter() - start_time
 
+    summary_data = [
+        {
+            "version": res.name,
+            "time_seconds": res.time_s,
+            "time_formatted": format_time(res.time_s),
+            "base_mem_mb": res.base_mem_mb,
+            "peak_delta_mb": res.peak_delta_mb,
+        }
+        for res in bench_records
+    ]
+    pd.DataFrame(summary_data).to_csv(
+        f"{output_dir}/benchmark_summary.csv", index=False
+    )
     print_benchmark_report(bench_records, preload_time, save_time)
 
 
