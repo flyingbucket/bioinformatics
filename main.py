@@ -45,7 +45,15 @@ def main():
                 }
             )
 
+    output_dir = "./artifacts"
+    os.makedirs(output_dir, exist_ok=True)
     df = pd.DataFrame(results)
+    df["identity_by_seq1_length"] = df["identity_by_seq1_length"].map(
+        lambda x: f"{x * 100:.2f}%"
+    )
+    df["identity_by_seq2_length"] = df["identity_by_seq2_length"].map(
+        lambda x: f"{x * 100:.2f}%"
+    )
     output_dir = "./artifacts"
     os.makedirs(output_dir, exist_ok=True)
 
